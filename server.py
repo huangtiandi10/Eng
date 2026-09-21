@@ -7,6 +7,8 @@ import random
 import re
 import sqlite3
 import sys
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -335,6 +337,159 @@ def list_unfamiliar_words() -> list[dict]:
     return [dict(row) for row in rows]
 
 
+WRITING_PROMPTS = [
+    {
+        "title": "The Value of Lifelong Learning",
+        "prompt": "Write an essay on the value of lifelong learning. You should explain why it matters and how college students can develop this habit.",
+    },
+    {
+        "title": "Responsible Use of Artificial Intelligence",
+        "prompt": "Write an essay on the responsible use of artificial intelligence in education. Give reasons and examples to support your view.",
+    },
+    {
+        "title": "Learning from Setbacks",
+        "prompt": "Write an essay on the importance of learning from setbacks. You should state your opinion and support it with examples.",
+    },
+    {
+        "title": "Community Service",
+        "prompt": "Write an essay discussing why university students should participate in community service and what they can gain from it.",
+    },
+    {
+        "title": "Information Overload",
+        "prompt": "Write an essay on how young people can deal with information overload in the digital age.",
+    },
+]
+
+
+def local_writing_evaluation(content: str) -> dict:
+    words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", content)
+    sentences = [part.strip() for part in re.split(r"[.!?]+", content) if part.strip()]
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
+    lower = content.lower()
+    connectors = [
+        term for term in ["however", "therefore", "moreover", "furthermore", "in addition", "for example", "in conclusion", "firstly", "secondly", "consequently"]
+        if term in lower
+    ]
+    unique_ratio = len({word.lower() for word in words}) / max(1, len(words))
+    average_sentence = len(words) / max(1, len(sentences))
+    length_score = max(8, 28 - abs(len(words) - 180) // 5)
+    structure_score = min(24, 10 + len(paragraphs) * 3 + len(connectors) * 2)
+    language_score = min(27, int(12 + unique_ratio * 16 + (3 if 10 <= average_sentence <= 25 else 0)))
+    content_score = min(21, 12 + min(5, len(sentences) // 2) + (4 if len(words) >= 120 else 0))
+    score = int(max(35, min(92, length_score + structure_score + language_score + content_score)))
+    issues = []
+    suggestions = []
+    if len(words) < 150:
+        issues.append(f"全文约 {len(words)} 词，论证可能不够充分。")
+        suggestions.append("补充一个具体例子，并解释它如何支持中心观点。")
+    elif len(words) > 220:
+        issues.append(f"全文约 {len(words)} 词，考试中可能挤压检查时间。")
+        suggestions.append("删除重复论点，将全文控制在 160-200 词左右。")
+    if len(paragraphs) < 3:
+        issues.append("段落层次不明显。")
+        suggestions.append("采用引言、主体、结论至少三段的结构。")
+    if len(connectors) < 2:
+        issues.append("显性逻辑连接较少。")
+        suggestions.append("在转折、递进和结论处自然加入连接词。")
+    if average_sentence > 27:
+        issues.append("平均句长偏长，容易产生粘连句。")
+        suggestions.append("把较长句拆分，并检查每个从句的谓语。")
+    if not issues:
+        issues.append("本地检查未发现明显的结构性问题。")
+        suggestions.append("继续检查冠词、单复数和动词时态等细节。")
+    return {
+        "score": score,
+        "source": "local",
+        "summary": "本地评分侧重字数、结构、词汇变化和逻辑标记；配置 AI 后可获得逐句语法反馈。",
+        "dimensions": {
+            "content": content_score,
+            "organization": structure_score,
+            "language": language_score,
+            "task_completion": length_score,
+        },
+        "issues": issues,
+        "suggestions": suggestions,
+        "revised_essay": "",
+        "useful_phrases": connectors[:5],
+        "word_count": len(words),
+    }
+
+
+def extract_json_object(value: str) -> dict:
+    value = value.strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*|\s*```$", "", value, flags=re.I)
+    start, end = value.find("{"), value.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("AI 未返回 JSON")
+    return json.loads(value[start:end + 1])
+
+
+def ai_writing_evaluation(title: str, prompt: str, content: str, config: dict) -> dict:
+    ai = config.get("ai", {})
+    base_url = str(ai.get("base_url", "")).rstrip("/")
+    api_key = str(ai.get("api_key", ""))
+    if not base_url or not api_key:
+        raise ValueError("AI 未配置")
+    instruction = """You are a strict CET-6 writing examiner. Score the essay on a 0-100 scale. Return JSON only with: score (integer), summary (Chinese), dimensions (object containing content, organization, language, task_completion, each 0-25), issues (Chinese string array), suggestions (Chinese string array), revised_essay (English), useful_phrases (English string array). Do not use markdown."""
+    body = json.dumps({
+        "model": ai.get("model", "gpt-4o-mini"),
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": f"Title: {title}\nPrompt: {prompt}\nEssay:\n{content}"},
+        ],
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/chat/completions", data=body, method="POST",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=int(ai.get("timeout_seconds", 60))) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")[:300]
+        raise ValueError(f"AI 接口返回 {error.code}: {detail}") from error
+    result = extract_json_object(payload["choices"][0]["message"]["content"])
+    result["source"] = "ai"
+    result["word_count"] = len(re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", content))
+    result["score"] = max(0, min(100, int(result.get("score", 0))))
+    return result
+
+
+def evaluate_writing(payload: dict) -> dict:
+    title = str(payload.get("title", "Untitled essay")).strip()[:160]
+    prompt = str(payload.get("prompt", "")).strip()[:2000]
+    content = str(payload.get("content", "")).strip()
+    if len(re.findall(r"[A-Za-z]+", content)) < 20:
+        raise ApiError(400, "作文至少需要 20 个英文单词")
+    config = read_config()
+    warning = ""
+    if config.get("ai", {}).get("api_key"):
+        try:
+            result = ai_writing_evaluation(title, prompt, content, config)
+        except (ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+            result = local_writing_evaluation(content)
+            warning = f"AI 评分失败，已使用本地评分：{error}"
+    else:
+        result = local_writing_evaluation(content)
+        warning = "未配置 API Key，本次使用本地基础评分。"
+    with connect() as db:
+        cursor = db.execute(
+            "INSERT INTO essays(title, prompt, content, score, feedback_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (title, prompt, content, result["score"], json.dumps(result, ensure_ascii=False), utc_now()),
+        )
+    return {"id": cursor.lastrowid, "warning": warning, **result}
+
+
+def writing_history() -> list[dict]:
+    with connect() as db:
+        rows = db.execute(
+            "SELECT id, title, score, created_at FROM essays ORDER BY id DESC LIMIT 20"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 class ApiError(Exception):
     def __init__(self, status: int, message: str):
         self.status = status
@@ -402,6 +557,12 @@ class AppHandler(BaseHTTPRequestHandler):
         if path == "/api/vocabulary/unfamiliar":
             self.send_json({"words": list_unfamiliar_words()})
             return
+        if path == "/api/writing/prompts":
+            self.send_json({"prompts": WRITING_PROMPTS})
+            return
+        if path == "/api/writing/history":
+            self.send_json({"essays": writing_history()})
+            return
         raise ApiError(404, "接口不存在")
 
     def handle_api_post(self, path: str, payload: dict) -> None:
@@ -416,6 +577,9 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/vocabulary/give-up":
             self.send_json(give_up_word(payload))
+            return
+        if path == "/api/writing/evaluate":
+            self.send_json(evaluate_writing(payload))
             return
         raise ApiError(404, "接口不存在")
 

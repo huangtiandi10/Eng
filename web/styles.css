@@ -75,6 +75,31 @@ main { min-width: 0; }
 .session-stat strong { font-family: Georgia, serif; font-size: 29px; }
 .session-stat span { color: var(--muted); font-size: 12px; }
 .session-note { margin: 0; padding: 18px 21px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.writing-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(310px, .65fr); gap: 20px; align-items: start; }
+.writing-editor .panel-body { padding: 24px; }
+.prompt-field { margin-top: 17px; }
+.editor-label { display: flex; justify-content: space-between; margin: 21px 0 7px; font-size: 12px; font-weight: 800; }
+.editor-label span { color: var(--muted); font-weight: 500; }
+.essay-textarea { width: 100%; min-height: 410px; resize: vertical; padding: 20px; border: 1px solid #cfd6d1; border-radius: 5px; color: var(--ink); background: #fbfcfa; font-family: Georgia, serif; font-size: 17px; line-height: 1.75; outline: none; }
+.essay-textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-2); }
+.editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 14px; font-size: 12px; }
+.writing-result { overflow: hidden; }
+.empty-result { display: grid; min-height: 310px; place-content: center; padding: 30px; color: var(--muted); text-align: center; }
+.empty-result span { color: #d9dedb; font-family: Georgia, serif; font-size: 80px; }
+.score-block { display: flex; align-items: center; gap: 20px; padding: 24px; border-bottom: 1px solid var(--line); background: #f8faf7; }
+.score-ring { display: grid; width: 92px; height: 92px; place-content: center; border: 7px solid var(--green-2); border-top-color: var(--green); border-radius: 50%; text-align: center; }
+.score-ring strong { font-family: Georgia, serif; font-size: 32px; line-height: .9; }
+.score-ring span { color: var(--muted); font-size: 10px; }
+.source-badge { color: var(--green); font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+.score-block p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.result-section { padding: 20px 22px; border-top: 1px solid var(--line); }
+.result-section h3 { margin: 0 0 9px; font-size: 13px; }
+.result-section p, .result-section li { color: #4f5b55; font-size: 12px; line-height: 1.65; }
+.result-section ul { margin: 0; padding-left: 17px; }
+.dimension-list { padding: 14px 22px; }
+.dimension-list > div { display: grid; grid-template-columns: 70px 1fr 38px; gap: 8px; align-items: center; min-height: 29px; font-size: 11px; }
+.dimension-list meter { width: 100%; accent-color: var(--green); }
+.revision { margin: 0 22px 22px; padding: 14px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; line-height: 1.7; }
 #toast { position: fixed; right: 24px; bottom: 24px; z-index: 20; max-width: 360px; padding: 12px 16px; border-radius: 5px; color: #fff; background: var(--ink); box-shadow: var(--shadow); opacity: 0; transform: translateY(10px); pointer-events: none; transition: .2s; }
 #toast.show { opacity: 1; transform: translateY(0); }
 @media (max-width: 760px) {
@@ -88,6 +113,7 @@ main { min-width: 0; }
   .content { padding: 24px 16px 50px; }
   .form-grid { grid-template-columns: 1fr; }
   .practice-layout { grid-template-columns: 1fr; }
+  .writing-layout { grid-template-columns: 1fr; }
   .session-panel { display: grid; grid-template-columns: 1fr 1fr; }
   .session-panel .panel-header, .session-note { grid-column: 1 / -1; }
   .practice-card { min-height: 470px; padding: 24px 18px; }

@@ -24,7 +24,7 @@ function toast(message) {
 const pages = {
   dashboard: { title: 'Dashboard', kicker: "TODAY'S PLAN", render: () => '<div class="panel"><div class="panel-body"><p class="muted">学习概览正在准备中。</p></div></div>' },
   vocabulary: { title: 'Vocabulary', kicker: 'BUILD YOUR WORD BANK', render: renderVocabulary },
-  writing: { title: 'Writing', kicker: 'THINK · WRITE · REVISE', render: () => '<div class="panel"><div class="panel-body"><p class="muted">写作训练正在准备中。</p></div></div>' },
+  writing: { title: 'Writing', kicker: 'THINK · WRITE · REVISE', render: renderWriting },
   listening: { title: 'Listening', kicker: 'HEAR EVERY DETAIL', render: () => '<div class="panel"><div class="panel-body"><p class="muted">听力训练正在准备中。</p></div></div>' },
   review: { title: 'Review', kicker: 'TURN WEAKNESS INTO MEMORY', render: () => '<div class="panel"><div class="panel-body"><p class="muted">复习中心正在准备中。</p></div></div>' },
   settings: { title: 'Settings', kicker: 'LOCAL CONFIGURATION', render: renderSettings },
@@ -56,6 +56,25 @@ function renderVocabulary() {
         <p class="session-note">答错后继续尝试。连续错误三次会出现首字母提示。</p>
       </aside>
     </section>`;
+}
+
+function renderWriting() {
+  return `
+    <div class="writing-layout">
+      <section class="writing-editor panel">
+        <div class="panel-header"><h2>Essay workspace</h2><button id="random-prompt" class="btn" type="button">换一个题目</button></div>
+        <div class="panel-body">
+          <div class="field"><label for="essay-title">Topic</label><input id="essay-title"></div>
+          <div class="field prompt-field"><label for="essay-prompt">Prompt</label><textarea id="essay-prompt" rows="3"></textarea></div>
+          <div class="editor-label"><label for="essay-content">Your essay</label><span><strong id="word-count">0</strong> words · 建议 160-200</span></div>
+          <textarea id="essay-content" class="essay-textarea" placeholder="Start writing here…" spellcheck="true"></textarea>
+          <div class="editor-actions"><span class="muted">文章只保存在当前电脑</span><button id="evaluate-essay" class="btn primary" type="button">AI Evaluate</button></div>
+        </div>
+      </section>
+      <aside id="writing-result" class="writing-result panel">
+        <div class="empty-result"><span>100</span><p>提交后在这里查看评分与修改建议。</p></div>
+      </aside>
+    </div>`;
 }
 
 function renderSettings() {
@@ -100,6 +119,10 @@ function bindPageEvents() {
     bindVocabulary();
     return;
   }
+  if (state.route === 'writing') {
+    bindWriting();
+    return;
+  }
   if (state.route !== 'settings') return;
   $('#provider').value = state.settings.ai.provider || 'openai';
   $('#settings-form').addEventListener('submit', async event => {
@@ -112,6 +135,53 @@ function bindPageEvents() {
     toast('设置已保存');
     state.settings = await api('/api/settings');
   });
+}
+
+async function bindWriting() {
+  const { prompts } = await api('/api/writing/prompts');
+  let index = Math.floor(Math.random() * prompts.length);
+  function setPrompt() {
+    const item = prompts[index];
+    $('#essay-title').value = item.title;
+    $('#essay-prompt').value = item.prompt;
+  }
+  function updateCount() {
+    const words = $('#essay-content').value.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) || [];
+    $('#word-count').textContent = words.length;
+  }
+  setPrompt();
+  $('#essay-content').addEventListener('input', updateCount);
+  $('#random-prompt').addEventListener('click', () => {
+    index = (index + 1 + Math.floor(Math.random() * (prompts.length - 1))) % prompts.length;
+    setPrompt();
+  });
+  $('#evaluate-essay').addEventListener('click', async () => {
+    const button = $('#evaluate-essay');
+    button.disabled = true;
+    button.textContent = 'Evaluating…';
+    try {
+      const result = await api('/api/writing/evaluate', { method: 'POST', body: JSON.stringify({ title: $('#essay-title').value, prompt: $('#essay-prompt').value, content: $('#essay-content').value }) });
+      renderWritingResult(result);
+      if (result.warning) toast(result.warning);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'AI Evaluate';
+    }
+  });
+}
+
+function renderWritingResult(result) {
+  const dimensions = result.dimensions || {};
+  const dimensionNames = { content: 'Content', organization: 'Structure', language: 'Language', task_completion: 'Task' };
+  $('#writing-result').innerHTML = `
+    <div class="score-block"><div class="score-ring"><strong>${result.score}</strong><span>/ 100</span></div><div><span class="source-badge">${result.source === 'ai' ? 'AI REVIEW' : 'LOCAL REVIEW'}</span><p>${result.word_count} words</p></div></div>
+    <div class="result-section"><h3>Overall</h3><p>${result.summary}</p></div>
+    <div class="dimension-list">${Object.entries(dimensions).map(([key, value]) => `<div><span>${dimensionNames[key] || key}</span><meter min="0" max="25" value="${value}"></meter><strong>${value}/25</strong></div>`).join('')}</div>
+    <div class="result-section"><h3>Issues</h3><ul>${(result.issues || []).map(item => `<li>${item}</li>`).join('')}</ul></div>
+    <div class="result-section"><h3>Next revision</h3><ul>${(result.suggestions || []).map(item => `<li>${item}</li>`).join('')}</ul></div>
+    ${result.revised_essay ? `<details class="revision"><summary>Revised version</summary><p>${result.revised_essay.replace(/\n/g, '<br>')}</p></details>` : ''}`;
 }
 
 function bindVocabulary() {
