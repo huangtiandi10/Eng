@@ -538,6 +538,77 @@ def check_listening_answer(payload: dict) -> dict:
         }
 
 
+def dashboard_data() -> dict:
+    config = read_config().get("study", {})
+    today = date.today().isoformat()
+    with connect() as db:
+        vocab_today = db.execute(
+            "SELECT COUNT(*) FROM practice_events WHERE substr(created_at, 1, 10) = ? AND result = 'correct'",
+            (today,),
+        ).fetchone()[0]
+        phrases_today = db.execute(
+            "SELECT COUNT(*) FROM practice_events WHERE substr(created_at, 1, 10) = ? AND mode = 'phrase' AND result = 'correct'",
+            (today,),
+        ).fetchone()[0]
+        listening_today = db.execute(
+            "SELECT COUNT(*) FROM listening_events WHERE substr(created_at, 1, 10) = ?", (today,)
+        ).fetchone()[0]
+        total_words = db.execute("SELECT COUNT(*) FROM words").fetchone()[0]
+        mastered = db.execute("SELECT COUNT(*) FROM word_progress WHERE mastery >= 70").fetchone()[0]
+        unfamiliar = db.execute("SELECT COUNT(*) FROM word_progress WHERE unfamiliar = 1").fetchone()[0]
+        latest_essay = db.execute("SELECT score, title FROM essays ORDER BY id DESC LIMIT 1").fetchone()
+        listening = db.execute("SELECT COUNT(*) AS total, COALESCE(SUM(correct), 0) AS correct FROM listening_events").fetchone()
+        activity_days = [row[0] for row in db.execute(
+            """SELECT day FROM (
+                   SELECT substr(created_at,1,10) day FROM practice_events
+                   UNION SELECT substr(created_at,1,10) day FROM essays
+                   UNION SELECT substr(created_at,1,10) day FROM listening_events
+               ) ORDER BY day DESC"""
+        ).fetchall()]
+    streak = 0
+    cursor = date.today()
+    for day_value in activity_days:
+        if day_value == cursor.isoformat():
+            streak += 1
+            cursor = date.fromordinal(cursor.toordinal() - 1)
+        elif day_value < cursor.isoformat():
+            break
+    exam_date = config.get("exam_date", "")
+    days_to_exam = None
+    if exam_date:
+        try:
+            days_to_exam = max(0, (date.fromisoformat(str(exam_date)) - date.today()).days)
+        except ValueError:
+            pass
+    return {
+        "goals": {
+            "vocabulary": {"done": vocab_today, "target": int(config.get("daily_new_words", 30)) + int(config.get("daily_reviews", 50))},
+            "phrases": {"done": phrases_today, "target": int(config.get("daily_phrases", 10))},
+            "listening": {"done": listening_today, "target": int(config.get("daily_listening", 5))},
+        },
+        "mastered": mastered, "total_words": total_words, "unfamiliar": unfamiliar,
+        "streak": streak, "days_to_exam": days_to_exam,
+        "latest_essay": dict(latest_essay) if latest_essay else None,
+        "listening_accuracy": round(listening["correct"] * 100 / listening["total"]) if listening["total"] else 0,
+    }
+
+
+def review_data() -> dict:
+    with connect() as db:
+        due = db.execute(
+            """SELECT COUNT(*) FROM word_progress
+               WHERE unfamiliar = 1 OR (next_review_at IS NOT NULL AND next_review_at <= ?)""", (utc_now(),)
+        ).fetchone()[0]
+        essays = db.execute(
+            "SELECT title, score, feedback_json, created_at FROM essays ORDER BY id DESC LIMIT 5"
+        ).fetchall()
+    writing_notes = []
+    for essay in essays:
+        feedback = json.loads(essay["feedback_json"] or "{}")
+        writing_notes.extend(feedback.get("suggestions", [])[:2])
+    return {"due": due, "unfamiliar": list_unfamiliar_words(), "writing_notes": writing_notes[:8]}
+
+
 class ApiError(Exception):
     def __init__(self, status: int, message: str):
         self.status = status
@@ -614,6 +685,12 @@ class AppHandler(BaseHTTPRequestHandler):
         if path == "/api/listening/next":
             mode = query.get("mode", ["mixed"])[0]
             self.send_json(next_listening_question(mode))
+            return
+        if path == "/api/dashboard":
+            self.send_json(dashboard_data())
+            return
+        if path == "/api/review":
+            self.send_json(review_data())
             return
         raise ApiError(404, "接口不存在")
 

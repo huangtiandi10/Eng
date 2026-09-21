@@ -22,13 +22,21 @@ function toast(message) {
 }
 
 const pages = {
-  dashboard: { title: 'Dashboard', kicker: "TODAY'S PLAN", render: () => '<div class="panel"><div class="panel-body"><p class="muted">学习概览正在准备中。</p></div></div>' },
+  dashboard: { title: 'Dashboard', kicker: "TODAY'S PLAN", render: renderDashboard },
   vocabulary: { title: 'Vocabulary', kicker: 'BUILD YOUR WORD BANK', render: renderVocabulary },
   writing: { title: 'Writing', kicker: 'THINK · WRITE · REVISE', render: renderWriting },
   listening: { title: 'Listening', kicker: 'HEAR EVERY DETAIL', render: renderListening },
-  review: { title: 'Review', kicker: 'TURN WEAKNESS INTO MEMORY', render: () => '<div class="panel"><div class="panel-body"><p class="muted">复习中心正在准备中。</p></div></div>' },
+  review: { title: 'Review', kicker: 'TURN WEAKNESS INTO MEMORY', render: renderReview },
   settings: { title: 'Settings', kicker: 'LOCAL CONFIGURATION', render: renderSettings },
 };
+
+function renderDashboard() {
+  return '<div id="dashboard-view"><div class="panel"><div class="panel-body"><p class="muted">正在读取本地学习记录…</p></div></div></div>';
+}
+
+function renderReview() {
+  return '<div id="review-view"><div class="panel"><div class="panel-body"><p class="muted">正在整理复习内容…</p></div></div></div>';
+}
 
 function renderVocabulary() {
   return `
@@ -135,6 +143,10 @@ async function navigate(route) {
 }
 
 function bindPageEvents() {
+  if (state.route === 'dashboard') {
+    loadDashboard();
+    return;
+  }
   if (state.route === 'vocabulary') {
     bindVocabulary();
     return;
@@ -145,6 +157,10 @@ function bindPageEvents() {
   }
   if (state.route === 'listening') {
     bindListening();
+    return;
+  }
+  if (state.route === 'review') {
+    loadReview();
     return;
   }
   if (state.route !== 'settings') return;
@@ -158,6 +174,43 @@ function bindPageEvents() {
     await api('/api/settings', { method: 'POST', body: JSON.stringify(payload) });
     toast('设置已保存');
     state.settings = await api('/api/settings');
+  });
+}
+
+async function loadDashboard() {
+  const data = await api('/api/dashboard');
+  const goals = data.goals;
+  const goalCard = (label, goal, route) => {
+    const percent = goal.target ? Math.min(100, Math.round(goal.done * 100 / goal.target)) : 100;
+    return `<button class="goal-card" data-route="${route}"><div><span>${label}</span><strong>${goal.done}<small> / ${goal.target}</small></strong></div><div class="progress"><i style="width:${percent}%"></i></div><em>${percent}%</em></button>`;
+  };
+  $('#dashboard-view').innerHTML = `
+    <section class="dashboard-intro"><div><h2>稳步走向 500</h2><p>完成目标不是终点，今天随时可以继续训练。</p></div>${data.days_to_exam !== null ? `<div class="exam-count"><strong>${data.days_to_exam}</strong><span>days to exam</span></div>` : '<button class="btn" data-route="settings">设置考试日期</button>'}</section>
+    <div class="metric-grid">
+      <div class="metric"><span>Vocabulary mastery</span><strong>${data.mastered}<small> / ${data.total_words}</small></strong><p>${data.unfamiliar} unfamiliar words</p></div>
+      <div class="metric"><span>Writing score</span><strong>${data.latest_essay ? data.latest_essay.score : '—'}<small> / 100</small></strong><p>${data.latest_essay ? data.latest_essay.title : 'No essay yet'}</p></div>
+      <div class="metric"><span>Listening accuracy</span><strong>${data.listening_accuracy}<small>%</small></strong><p>All dictation attempts</p></div>
+      <div class="metric"><span>Study streak</span><strong>${data.streak}<small> days</small></strong><p>Stored on this computer</p></div>
+    </div>
+    <section class="panel today-panel"><div class="panel-header"><h2>Today</h2><span class="muted">Daily targets</span></div><div class="goal-grid">${goalCard('Vocabulary', goals.vocabulary, 'vocabulary')}${goalCard('Phrases', goals.phrases, 'vocabulary')}${goalCard('Listening', goals.listening, 'listening')}<button class="goal-card writing-goal" data-route="writing"><div><span>Writing</span><strong>Practice</strong></div><p>Write, score, revise</p><em>→</em></button></div></section>`;
+}
+
+async function loadReview() {
+  const data = await api('/api/review');
+  $('#review-view').innerHTML = `
+    <section class="review-head"><div><p>DUE NOW</p><h2>${data.due} items waiting</h2><span>陌生词会混入普通训练，不需要一次清空。</span></div><button class="btn primary" data-route="vocabulary">Start review</button></section>
+    <div class="review-grid">
+      <section class="panel"><div class="panel-header"><h2>Unfamiliar words</h2><button id="export-words" class="btn" type="button">Export .txt</button></div><div class="word-table">${data.unfamiliar.length ? data.unfamiliar.map(item => `<div><strong>${item.word}</strong><span>${item.pos}</span><p>${item.meaning}</p><em>${Math.round(item.mastery)}%</em></div>`).join('') : '<p class="empty-copy">还没有陌生词。训练时点击“不认识”后会出现在这里。</p>'}</div></section>
+      <section class="panel"><div class="panel-header"><h2>Writing reminders</h2></div><div class="note-list">${data.writing_notes.length ? data.writing_notes.map(item => `<p>${item}</p>`).join('') : '<p class="empty-copy">完成一篇作文后，这里会积累修改重点。</p>'}</div></section>
+    </div>`;
+  const exportButton = $('#export-words');
+  if (exportButton) exportButton.addEventListener('click', () => {
+    const text = data.unfamiliar.map(item => `${item.word}\t${item.pos}\t${item.meaning}`).join('\n');
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    link.download = `cet6-unfamiliar-${new Date().toISOString().slice(0, 10)}.txt`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   });
 }
 
