@@ -24,3 +24,9 @@ cp config.example.yaml config.yaml
 
 学习记录保存在 `data/study.db`，不会上传。`data/words.json` 是当前内置的 CET6 核心词汇种子，字段设计兼容后续导入完整公开词表。词库来源与许可证在 `data/SOURCE.md` 中记录。
 
+下载并导入 2345 条公开 CET6 词汇：
+
+```bash
+python3 scripts/download_vocabulary.py
+```
+

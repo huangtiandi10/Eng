@@ -186,12 +186,14 @@ def choose_mode(requested: str, phrases: list[str]) -> str:
 def next_vocabulary_question(requested_mode: str) -> dict:
     now = utc_now()
     with connect() as db:
+        phrase_filter = "WHERE w.phrases_json != '[]'" if requested_mode == "phrase" else ""
         rows = db.execute(
-            """
+            f"""
             SELECT w.*, COALESCE(p.unfamiliar, 0) AS unfamiliar,
                    COALESCE(p.mastery, 0) AS mastery, p.next_review_at
             FROM words w
             LEFT JOIN word_progress p ON p.word_id = w.id
+            {phrase_filter}
             ORDER BY
               CASE WHEN p.next_review_at IS NOT NULL AND p.next_review_at <= ? THEN 0 ELSE 1 END,
               CASE WHEN COALESCE(p.unfamiliar, 0) = 1 THEN RANDOM() % 3 ELSE 3 END,
@@ -495,9 +497,11 @@ def next_listening_question(requested_mode: str) -> dict:
         raise ApiError(400, "未知听力模式")
     mode = random.choice(["word", "sentence"]) if requested_mode == "mixed" else requested_mode
     with connect() as db:
+        sentence_filter = "WHERE w.example != ''" if mode == "sentence" else ""
         row = db.execute(
-            """SELECT w.* FROM words w LEFT JOIN word_progress p ON p.word_id = w.id
-               ORDER BY COALESCE(p.mastery, 0), RANDOM() LIMIT 1"""
+            f"""SELECT w.* FROM words w LEFT JOIN word_progress p ON p.word_id = w.id
+                {sentence_filter}
+                ORDER BY COALESCE(p.mastery, 0), RANDOM() LIMIT 1"""
         ).fetchone()
     if not row:
         raise ApiError(404, "词库为空")
