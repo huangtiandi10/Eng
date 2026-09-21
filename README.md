@@ -83,3 +83,8 @@ curl http://127.0.0.1:8765/api/health
 Windows 访问
 你的 Mac 当前局域网 IP 是 10.150.219.208，Windows 浏览器打开：
 http://10.150.219.208:8765
+
+
+./scripts/server.sh start
+./scripts/server.sh status
+./scripts/server.sh stop
