@@ -5,10 +5,24 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  const request = token => fetch(path, {
     ...options,
+    headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Access-Token': token } : {}), ...(options.headers || {}) },
   });
+  let token = localStorage.getItem('cet6_access_token') || '';
+  let response = await request(token);
+  if (response.status === 401 && path !== '/api/login') {
+    token = window.prompt('请输入 Mac 服务端的访问令牌（config.yaml 的 server.access_token）：') || '';
+    if (!token) throw new Error('未提供访问令牌');
+    const login = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: token }),
+    });
+    if (!login.ok) throw new Error('访问令牌无效');
+    localStorage.setItem('cet6_access_token', token);
+    response = await request(token);
+  }
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || '请求失败');
   return data;
@@ -77,7 +91,7 @@ function renderWriting() {
           <div class="field prompt-field"><label for="essay-prompt">Prompt</label><textarea id="essay-prompt" rows="3"></textarea></div>
           <div class="editor-label"><label for="essay-content">Your essay</label><span><strong id="word-count">0</strong> words · 建议 160-200</span></div>
           <textarea id="essay-content" class="essay-textarea" placeholder="Start writing here…" spellcheck="true"></textarea>
-          <div class="editor-actions"><span class="muted">文章只保存在当前电脑</span><button id="evaluate-essay" class="btn primary" type="button">AI Evaluate</button></div>
+          <div class="editor-actions"><span class="muted">文章保存在 Mac 服务端</span><button id="evaluate-essay" class="btn primary" type="button">AI Evaluate</button></div>
         </div>
       </section>
       <aside id="writing-result" class="writing-result panel">
@@ -111,7 +125,7 @@ function renderSettings() {
   const study = state.settings?.study || {};
   return `
     <form id="settings-form" class="panel">
-      <div class="panel-header"><h2>AI Provider</h2><span class="muted">API Key 仅保存在本机</span></div>
+      <div class="panel-header"><h2>AI Provider</h2><span class="muted">API Key 仅保存在 Mac 服务端</span></div>
       <div class="panel-body form-grid">
         <div class="field"><label for="provider">服务商</label><select id="provider"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="custom">Custom compatible</option></select></div>
         <div class="field"><label for="model">模型</label><input id="model" value="${escapeHtml(ai.model || '')}" placeholder="gpt-4o-mini"></div>
@@ -191,7 +205,7 @@ async function loadDashboard() {
       <div class="metric"><span>Vocabulary mastery</span><strong>${data.mastered}<small> / ${data.total_words}</small></strong><p>${data.unfamiliar} unfamiliar words</p></div>
       <div class="metric"><span>Writing score</span><strong>${data.latest_essay ? data.latest_essay.score : '—'}<small> / 100</small></strong><p>${data.latest_essay ? escapeHtml(data.latest_essay.title) : 'No essay yet'}</p></div>
       <div class="metric"><span>Listening accuracy</span><strong>${data.listening_accuracy}<small>%</small></strong><p>All dictation attempts</p></div>
-      <div class="metric"><span>Study streak</span><strong>${data.streak}<small> days</small></strong><p>Stored on this computer</p></div>
+      <div class="metric"><span>Study streak</span><strong>${data.streak}<small> days</small></strong><p>Stored on Mac server</p></div>
     </div>
     <section class="panel today-panel"><div class="panel-header"><h2>Today</h2><span class="muted">Daily targets</span></div><div class="goal-grid">${goalCard('Vocabulary', goals.vocabulary, 'vocabulary')}${goalCard('Phrases', goals.phrases, 'vocabulary')}${goalCard('Listening', goals.listening, 'listening')}<button class="goal-card writing-goal" data-route="writing"><div><span>Writing</span><strong>Practice</strong></div><p>Write, score, revise</p><em>→</em></button></div></section>`;
 }

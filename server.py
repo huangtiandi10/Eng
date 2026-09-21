@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import hmac
 import mimetypes
+import os
 import random
 import re
+import secrets
 import sqlite3
 import sys
 import urllib.error
@@ -21,8 +24,8 @@ DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "study.db"
 CONFIG_PATH = ROOT / "config.yaml"
 WORDS_PATH = DATA_DIR / "words.json"
-HOST = "127.0.0.1"
-PORT = 8765
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8765
 
 
 def utc_now() -> str:
@@ -69,6 +72,7 @@ def write_config(payload: dict) -> None:
     current = read_config()
     ai = {**current.get("ai", {}), **payload.get("ai", {})}
     study = {**current.get("study", {}), **payload.get("study", {})}
+    server = {**current.get("server", {}), **payload.get("server", {})}
     lines = [
         "ai:",
         f"  provider: {ai.get('provider', 'openai')}",
@@ -82,9 +86,31 @@ def write_config(payload: dict) -> None:
         f"  daily_phrases: {int(study.get('daily_phrases', 10))}",
         f"  daily_listening: {int(study.get('daily_listening', 5))}",
         f"  exam_date: \"{str(study.get('exam_date', '')).replace(chr(34), '')}\"",
+        "server:",
+        f"  host: {server.get('host', DEFAULT_HOST)}",
+        f"  port: {int(server.get('port', DEFAULT_PORT))}",
+        f"  access_token: \"{str(server.get('access_token', '')).replace(chr(34), '')}\"",
         "",
     ]
     CONFIG_PATH.write_text("\n".join(lines), encoding="utf-8")
+
+
+def server_config() -> dict:
+    config = read_config().get("server", {})
+    return {
+        "host": os.environ.get("CET6_HOST", config.get("host", DEFAULT_HOST)),
+        "port": int(os.environ.get("CET6_PORT", config.get("port", DEFAULT_PORT))),
+        "access_token": os.environ.get("CET6_ACCESS_TOKEN", config.get("access_token", "")),
+    }
+
+
+def ensure_access_token() -> str:
+    configured = server_config()["access_token"]
+    if configured:
+        return configured
+    token = secrets.token_urlsafe(32)
+    write_config({"server": {"access_token": token}})
+    return token
 
 
 def connect() -> sqlite3.Connection:
@@ -96,6 +122,7 @@ def connect() -> sqlite3.Connection:
 
 def init_db() -> None:
     DATA_DIR.mkdir(exist_ok=True)
+    ensure_access_token()
     with connect() as db:
         db.executescript(
             """
@@ -641,10 +668,21 @@ class AppHandler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError) as error:
             raise ApiError(400, "请求内容不是有效的 JSON") from error
 
+    def require_auth(self, path: str, payload: dict | None = None) -> None:
+        if path == "/api/health":
+            return
+        expected = ensure_access_token()
+        supplied = self.headers.get("X-Access-Token", "")
+        if payload is not None and path == "/api/login":
+            supplied = str(payload.get("access_token", ""))
+        if not supplied or not hmac.compare_digest(supplied, expected):
+            raise ApiError(401, "需要有效的访问令牌")
+
     def do_GET(self) -> None:
         try:
             parsed = urlparse(self.path)
             if parsed.path.startswith("/api/"):
+                self.require_auth(parsed.path)
                 self.handle_api_get(parsed.path, parse_qs(parsed.query))
             else:
                 self.serve_static(parsed.path)
@@ -656,7 +694,9 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             parsed = urlparse(self.path)
-            self.handle_api_post(parsed.path, self.read_json())
+            payload = self.read_json()
+            self.require_auth(parsed.path, payload)
+            self.handle_api_post(parsed.path, payload)
         except ApiError as error:
             self.send_json({"error": error.message}, error.status)
         except Exception as error:
@@ -699,6 +739,9 @@ class AppHandler(BaseHTTPRequestHandler):
         raise ApiError(404, "接口不存在")
 
     def handle_api_post(self, path: str, payload: dict) -> None:
+        if path == "/api/login":
+            self.send_json({"ok": True})
+            return
         if path == "/api/settings":
             if payload.get("ai", {}).get("api_key") == "":
                 payload.setdefault("ai", {})["api_key"] = read_config().get("ai", {}).get("api_key", "")
@@ -737,8 +780,10 @@ class AppHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     init_db()
-    server = ThreadingHTTPServer((HOST, PORT), AppHandler)
-    print(f"CET6 500 is running at http://{HOST}:{PORT}")
+    settings = server_config()
+    server = ThreadingHTTPServer((settings["host"], settings["port"]), AppHandler)
+    print(f"CET6 500 is running at http://{settings['host']}:{settings['port']}")
+    print("访问令牌已保存在 config.yaml 的 server.access_token 中。")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

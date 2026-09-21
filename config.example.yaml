@@ -10,4 +10,9 @@ study:
   daily_phrases: 10
   daily_listening: 5
   exam_date: ""
-
+server:
+  # Mac 本机使用 127.0.0.1；需要让 Windows 访问时改为 0.0.0.0。
+  host: 127.0.0.1
+  port: 8765
+  # 首次启动会自动生成；不要提交真实令牌到 Git。
+  access_token: ""
