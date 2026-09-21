@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import random
+import re
 import sqlite3
 import sys
 from datetime import date, datetime, timezone
@@ -157,6 +159,182 @@ def init_db() -> None:
             )
 
 
+VALID_MODES = {"zh-en", "en-zh", "phrase", "mixed"}
+
+
+def normalize_english(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def chinese_tokens(value: str) -> set[str]:
+    return {item for item in re.split(r"[；;，,、\s]+", value) if item}
+
+
+def choose_mode(requested: str, phrases: list[str]) -> str:
+    if requested not in VALID_MODES:
+        raise ApiError(400, "未知训练模式")
+    if requested != "mixed":
+        return requested
+    choices = ["zh-en", "en-zh"]
+    if phrases:
+        choices.append("phrase")
+    return random.choice(choices)
+
+
+def next_vocabulary_question(requested_mode: str) -> dict:
+    now = utc_now()
+    with connect() as db:
+        rows = db.execute(
+            """
+            SELECT w.*, COALESCE(p.unfamiliar, 0) AS unfamiliar,
+                   COALESCE(p.mastery, 0) AS mastery, p.next_review_at
+            FROM words w
+            LEFT JOIN word_progress p ON p.word_id = w.id
+            ORDER BY
+              CASE WHEN p.next_review_at IS NOT NULL AND p.next_review_at <= ? THEN 0 ELSE 1 END,
+              CASE WHEN COALESCE(p.unfamiliar, 0) = 1 THEN RANDOM() % 3 ELSE 3 END,
+              COALESCE(p.mastery, 0), RANDOM()
+            LIMIT 12
+            """,
+            (now,),
+        ).fetchall()
+    if not rows:
+        raise ApiError(404, "词库为空")
+    row = random.choice(rows[: min(5, len(rows))])
+    phrases = json.loads(row["phrases_json"])
+    mode = choose_mode(requested_mode, phrases)
+    prompt = row["meaning"] if mode in {"zh-en", "phrase"} else row["word"]
+    if mode == "phrase":
+        phrase = random.choice(phrases)
+        prompt = f"使用“{row['meaning'].split('；')[0]}”相关表达写出词组"
+        letter_count = len(phrase.replace(" ", ""))
+    else:
+        letter_count = len(row["word"])
+    return {
+        "id": row["id"],
+        "mode": mode,
+        "prompt": prompt,
+        "pos": row["pos"],
+        "letter_count": letter_count,
+        "phonetic": row["phonetic"] if mode == "en-zh" else "",
+        "unfamiliar": bool(row["unfamiliar"]),
+    }
+
+
+def question_answer(row: sqlite3.Row, mode: str) -> str:
+    phrases = json.loads(row["phrases_json"])
+    if mode == "phrase":
+        return phrases[0] if phrases else row["word"]
+    return row["meaning"] if mode == "en-zh" else row["word"]
+
+
+def make_hint(answer: str, guess: str, failures: int) -> dict:
+    normalized_answer = normalize_english(answer)
+    normalized_guess = normalize_english(guess)
+    positions = [
+        index + 1
+        for index, char in enumerate(normalized_answer)
+        if index >= len(normalized_guess) or normalized_guess[index] != char
+    ]
+    if len(normalized_guess) > len(normalized_answer):
+        positions.extend(range(len(normalized_answer) + 1, len(normalized_guess) + 1))
+    reveal = 0 if failures < 3 else min(len(normalized_answer), failures - 2)
+    pattern = "".join(char if char == " " or index < reveal else "_" for index, char in enumerate(normalized_answer))
+    return {"wrong_positions": positions, "pattern": pattern, "letter_count": len(normalized_answer.replace(" ", ""))}
+
+
+def check_vocabulary_answer(payload: dict) -> dict:
+    word_id = int(payload.get("id", 0))
+    mode = payload.get("mode", "")
+    answer = str(payload.get("answer", "")).strip()
+    failures = max(1, int(payload.get("failures", 1)))
+    if mode not in {"zh-en", "en-zh", "phrase"} or not answer:
+        raise ApiError(400, "请填写答案")
+    with connect() as db:
+        row = db.execute("SELECT * FROM words WHERE id = ?", (word_id,)).fetchone()
+        if not row:
+            raise ApiError(404, "单词不存在")
+        expected = question_answer(row, mode)
+        if mode == "en-zh":
+            expected_tokens = chinese_tokens(expected)
+            answer_tokens = chinese_tokens(answer)
+            is_correct = bool(answer_tokens) and any(
+                any(token in item or item in token for item in expected_tokens)
+                for token in answer_tokens
+            )
+        else:
+            is_correct = normalize_english(answer) == normalize_english(expected)
+        progress = db.execute("SELECT * FROM word_progress WHERE word_id = ?", (word_id,)).fetchone()
+        attempts = (progress["attempts"] if progress else 0) + 1
+        correct_count = (progress["correct"] if progress else 0) + int(is_correct)
+        streak = (progress["streak"] if progress else 0) + 1 if is_correct else 0
+        unfamiliar = progress["unfamiliar"] if progress else 0
+        mastery = progress["mastery"] if progress else 0
+        mastery = min(100, mastery + (12 if failures == 1 else 6)) if is_correct else max(0, mastery - 3)
+        if is_correct and streak >= 3:
+            unfamiliar = 0
+        interval_days = min(30, max(1, 2 ** min(streak, 5))) if is_correct else 0
+        next_review = datetime.fromtimestamp(datetime.now().timestamp() + interval_days * 86400, timezone.utc).isoformat()
+        db.execute(
+            """INSERT INTO word_progress(word_id, attempts, correct, streak, unfamiliar, mastery, next_review_at, last_seen_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(word_id) DO UPDATE SET attempts=excluded.attempts, correct=excluded.correct,
+               streak=excluded.streak, unfamiliar=excluded.unfamiliar, mastery=excluded.mastery,
+               next_review_at=excluded.next_review_at, last_seen_at=excluded.last_seen_at""",
+            (word_id, attempts, correct_count, streak, unfamiliar, mastery, next_review, utc_now()),
+        )
+        db.execute(
+            "INSERT INTO practice_events(word_id, mode, result, answer, created_at) VALUES (?, ?, ?, ?, ?)",
+            (word_id, mode, "correct" if is_correct else "wrong", answer, utc_now()),
+        )
+        response = {"correct": is_correct}
+        if is_correct:
+            response.update({
+                "answer": expected,
+                "word": row["word"], "meaning": row["meaning"], "pos": row["pos"],
+                "phonetic": row["phonetic"], "example": row["example"],
+            })
+        elif mode == "en-zh":
+            response.update({"answer": expected, "pos": row["pos"], "accepted": False})
+        else:
+            response["hint"] = make_hint(expected, answer, failures)
+        return response
+
+
+def give_up_word(payload: dict) -> dict:
+    word_id = int(payload.get("id", 0))
+    mode = payload.get("mode", "zh-en")
+    with connect() as db:
+        row = db.execute("SELECT * FROM words WHERE id = ?", (word_id,)).fetchone()
+        if not row:
+            raise ApiError(404, "单词不存在")
+        db.execute(
+            """INSERT INTO word_progress(word_id, attempts, unfamiliar, mastery, next_review_at, last_seen_at)
+               VALUES (?, 1, 1, 0, ?, ?)
+               ON CONFLICT(word_id) DO UPDATE SET attempts=attempts+1, streak=0, unfamiliar=1,
+               mastery=MAX(0, mastery-10), next_review_at=excluded.next_review_at, last_seen_at=excluded.last_seen_at""",
+            (word_id, utc_now(), utc_now()),
+        )
+        db.execute(
+            "INSERT INTO practice_events(word_id, mode, result, created_at) VALUES (?, ?, 'give_up', ?)",
+            (word_id, mode, utc_now()),
+        )
+        return {
+            "answer": question_answer(row, mode), "word": row["word"], "meaning": row["meaning"],
+            "pos": row["pos"], "phonetic": row["phonetic"], "example": row["example"],
+        }
+
+
+def list_unfamiliar_words() -> list[dict]:
+    with connect() as db:
+        rows = db.execute(
+            """SELECT w.word, w.pos, w.meaning, w.phonetic, p.mastery, p.last_seen_at
+               FROM word_progress p JOIN words w ON w.id = p.word_id
+               WHERE p.unfamiliar = 1 ORDER BY p.last_seen_at DESC"""
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 class ApiError(Exception):
     def __init__(self, status: int, message: str):
         self.status = status
@@ -217,6 +395,13 @@ class AppHandler(BaseHTTPRequestHandler):
             ai["has_api_key"] = bool(config.get("ai", {}).get("api_key"))
             self.send_json({"ai": ai, "study": config.get("study", {})})
             return
+        if path == "/api/vocabulary/next":
+            mode = query.get("mode", ["mixed"])[0]
+            self.send_json(next_vocabulary_question(mode))
+            return
+        if path == "/api/vocabulary/unfamiliar":
+            self.send_json({"words": list_unfamiliar_words()})
+            return
         raise ApiError(404, "接口不存在")
 
     def handle_api_post(self, path: str, payload: dict) -> None:
@@ -225,6 +410,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 payload.setdefault("ai", {})["api_key"] = read_config().get("ai", {}).get("api_key", "")
             write_config(payload)
             self.send_json({"ok": True})
+            return
+        if path == "/api/vocabulary/answer":
+            self.send_json(check_vocabulary_answer(payload))
+            return
+        if path == "/api/vocabulary/give-up":
+            self.send_json(give_up_word(payload))
             return
         raise ApiError(404, "接口不存在")
 
@@ -258,4 +449,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
