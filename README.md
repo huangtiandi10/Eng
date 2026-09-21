@@ -79,3 +79,7 @@ tail -f /Applications/xm/Eng/server.log
 确认服务是否正常：
 curl http://127.0.0.1:8765/api/health
 返回 {"ok": true, ...} 就表示服务正常。
+
+Windows 访问
+你的 Mac 当前局域网 IP 是 10.150.219.208，Windows 浏览器打开：
+http://10.150.219.208:8765
