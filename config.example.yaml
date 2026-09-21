@@ -1,0 +1,13 @@
+ai:
+  provider: openai
+  base_url: https://api.openai.com/v1
+  api_key: ""
+  model: gpt-4o-mini
+  timeout_seconds: 60
+study:
+  daily_new_words: 30
+  daily_reviews: 50
+  daily_phrases: 10
+  daily_listening: 5
+  exam_date: ""
+

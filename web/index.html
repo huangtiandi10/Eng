@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f4f5f2">
+  <title>CET6 500</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#dashboard" aria-label="CET6 500 首页">
+        <span class="brand-mark">C6</span>
+        <span><strong>CET6 500</strong><small>Local Study Lab</small></span>
+      </a>
+      <nav id="primary-nav" aria-label="主要导航">
+        <button data-route="dashboard" class="active"><span aria-hidden="true">⌂</span>Dashboard</button>
+        <button data-route="vocabulary"><span aria-hidden="true">Aa</span>Vocabulary</button>
+        <button data-route="writing"><span aria-hidden="true">✎</span>Writing</button>
+        <button data-route="listening"><span aria-hidden="true">◖</span>Listening</button>
+        <button data-route="review"><span aria-hidden="true">↻</span>Review</button>
+      </nav>
+      <button class="settings-link" data-route="settings"><span aria-hidden="true">⚙</span>Settings</button>
+    </aside>
+    <main>
+      <header class="topbar">
+        <button id="menu-button" class="icon-button" aria-label="打开菜单">☰</button>
+        <div><p id="page-kicker">TODAY'S PLAN</p><h1 id="page-title">Dashboard</h1></div>
+        <div class="top-actions"><span id="today-label"></span><span class="status-dot" title="数据仅保存在本机"></span></div>
+      </header>
+      <section id="app-content" class="content" aria-live="polite"></section>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
+
