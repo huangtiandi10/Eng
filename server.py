@@ -490,6 +490,54 @@ def writing_history() -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def next_listening_question(requested_mode: str) -> dict:
+    if requested_mode not in {"word", "sentence", "mixed"}:
+        raise ApiError(400, "未知听力模式")
+    mode = random.choice(["word", "sentence"]) if requested_mode == "mixed" else requested_mode
+    with connect() as db:
+        row = db.execute(
+            """SELECT w.* FROM words w LEFT JOIN word_progress p ON p.word_id = w.id
+               ORDER BY COALESCE(p.mastery, 0), RANDOM() LIMIT 1"""
+        ).fetchone()
+    if not row:
+        raise ApiError(404, "词库为空")
+    text = row["word"] if mode == "word" else row["example"]
+    return {"id": row["id"], "mode": mode, "speech": text, "word_count": len(text.split())}
+
+
+def word_diff(expected: str, answer: str) -> list[dict]:
+    expected_words = normalize_english(expected).split()
+    answer_words = normalize_english(answer).split()
+    result = []
+    for index, word in enumerate(expected_words):
+        result.append({"word": word, "correct": index < len(answer_words) and answer_words[index] == word})
+    if len(answer_words) > len(expected_words):
+        result.extend({"word": word, "correct": False, "extra": True} for word in answer_words[len(expected_words):])
+    return result
+
+
+def check_listening_answer(payload: dict) -> dict:
+    word_id = int(payload.get("id", 0))
+    mode = payload.get("mode", "")
+    answer = str(payload.get("answer", "")).strip()
+    if mode not in {"word", "sentence"} or not answer:
+        raise ApiError(400, "请填写听到的内容")
+    with connect() as db:
+        row = db.execute("SELECT * FROM words WHERE id = ?", (word_id,)).fetchone()
+        if not row:
+            raise ApiError(404, "听力题不存在")
+        expected = row["word"] if mode == "word" else row["example"]
+        correct = normalize_english(answer) == normalize_english(expected)
+        db.execute(
+            "INSERT INTO listening_events(word_id, answer, correct, created_at) VALUES (?, ?, ?, ?)",
+            (word_id, answer, int(correct), utc_now()),
+        )
+        return {
+            "correct": correct, "answer": expected, "diff": word_diff(expected, answer),
+            "meaning": row["meaning"], "pos": row["pos"], "phonetic": row["phonetic"],
+        }
+
+
 class ApiError(Exception):
     def __init__(self, status: int, message: str):
         self.status = status
@@ -563,6 +611,10 @@ class AppHandler(BaseHTTPRequestHandler):
         if path == "/api/writing/history":
             self.send_json({"essays": writing_history()})
             return
+        if path == "/api/listening/next":
+            mode = query.get("mode", ["mixed"])[0]
+            self.send_json(next_listening_question(mode))
+            return
         raise ApiError(404, "接口不存在")
 
     def handle_api_post(self, path: str, payload: dict) -> None:
@@ -580,6 +632,9 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/writing/evaluate":
             self.send_json(evaluate_writing(payload))
+            return
+        if path == "/api/listening/answer":
+            self.send_json(check_listening_answer(payload))
             return
         raise ApiError(404, "接口不存在")
 

@@ -25,7 +25,7 @@ const pages = {
   dashboard: { title: 'Dashboard', kicker: "TODAY'S PLAN", render: () => '<div class="panel"><div class="panel-body"><p class="muted">学习概览正在准备中。</p></div></div>' },
   vocabulary: { title: 'Vocabulary', kicker: 'BUILD YOUR WORD BANK', render: renderVocabulary },
   writing: { title: 'Writing', kicker: 'THINK · WRITE · REVISE', render: renderWriting },
-  listening: { title: 'Listening', kicker: 'HEAR EVERY DETAIL', render: () => '<div class="panel"><div class="panel-body"><p class="muted">听力训练正在准备中。</p></div></div>' },
+  listening: { title: 'Listening', kicker: 'HEAR EVERY DETAIL', render: renderListening },
   review: { title: 'Review', kicker: 'TURN WEAKNESS INTO MEMORY', render: () => '<div class="panel"><div class="panel-body"><p class="muted">复习中心正在准备中。</p></div></div>' },
   settings: { title: 'Settings', kicker: 'LOCAL CONFIGURATION', render: renderSettings },
 };
@@ -77,6 +77,26 @@ function renderWriting() {
     </div>`;
 }
 
+function renderListening() {
+  return `
+    <div class="mode-tabs listening-tabs"><button class="active" data-listening-mode="mixed">Mixed</button><button data-listening-mode="word">Words</button><button data-listening-mode="sentence">Sentences</button></div>
+    <section class="listening-stage panel">
+      <div class="listening-top"><span id="listening-type">MIXED DICTATION</span><label>Speed <select id="speech-rate"><option value="0.7">0.7×</option><option value="0.85">0.85×</option><option value="1" selected>1×</option></select></label></div>
+      <div class="audio-focus">
+        <button id="play-audio" class="play-button" type="button" aria-label="播放听力">▶</button>
+        <p id="listen-instruction">点击播放，然后写下你听到的内容</p>
+        <span id="listen-meta"></span>
+      </div>
+      <form id="listening-form" class="listening-form">
+        <label for="listening-answer">What did you hear?</label>
+        <textarea id="listening-answer" rows="3" autocomplete="off" spellcheck="false"></textarea>
+        <div class="listening-actions"><button id="replay-audio" class="btn" type="button">↻ Replay</button><button class="btn primary" type="submit">Check transcript</button></div>
+      </form>
+      <div id="listening-feedback" class="listening-feedback" hidden></div>
+      <button id="next-listening" class="btn primary" type="button" hidden>Next dictation</button>
+    </section>`;
+}
+
 function renderSettings() {
   const ai = state.settings?.ai || {};
   const study = state.settings?.study || {};
@@ -123,6 +143,10 @@ function bindPageEvents() {
     bindWriting();
     return;
   }
+  if (state.route === 'listening') {
+    bindListening();
+    return;
+  }
   if (state.route !== 'settings') return;
   $('#provider').value = state.settings.ai.provider || 'openai';
   $('#settings-form').addEventListener('submit', async event => {
@@ -135,6 +159,49 @@ function bindPageEvents() {
     toast('设置已保存');
     state.settings = await api('/api/settings');
   });
+}
+
+function bindListening() {
+  const session = { mode: 'mixed', question: null };
+  async function loadQuestion() {
+    speechSynthesis.cancel();
+    session.question = await api(`/api/listening/next?mode=${session.mode}`);
+    $('#listening-type').textContent = session.question.mode === 'word' ? 'WORD DICTATION' : 'SENTENCE DICTATION';
+    $('#listen-meta').textContent = session.question.mode === 'word' ? '1 word' : `${session.question.word_count} words`;
+    $('#listening-answer').value = '';
+    $('#listening-answer').disabled = false;
+    $('#listening-feedback').hidden = true;
+    $('#next-listening').hidden = true;
+  }
+  function speak() {
+    if (!session.question || !('speechSynthesis' in window)) return toast('当前浏览器不支持语音播放');
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(session.question.speech);
+    utterance.lang = 'en-US';
+    utterance.rate = +$('#speech-rate').value;
+    speechSynthesis.speak(utterance);
+    $('#play-audio').classList.add('playing');
+    utterance.onend = () => $('#play-audio').classList.remove('playing');
+  }
+  $$('[data-listening-mode]').forEach(button => button.addEventListener('click', async () => {
+    session.mode = button.dataset.listeningMode;
+    $$('[data-listening-mode]').forEach(item => item.classList.toggle('active', item === button));
+    await loadQuestion();
+  }));
+  $('#play-audio').addEventListener('click', speak);
+  $('#replay-audio').addEventListener('click', speak);
+  $('#listening-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const result = await api('/api/listening/answer', { method: 'POST', body: JSON.stringify({ id: session.question.id, mode: session.question.mode, answer: $('#listening-answer').value }) });
+    const diff = result.diff.map(item => `<span class="${item.correct ? 'heard' : 'missed'}">${item.word}</span>`).join(' ');
+    const feedback = $('#listening-feedback');
+    feedback.hidden = false;
+    feedback.innerHTML = `<strong>${result.correct ? 'Perfect transcript.' : 'Compare word by word'}</strong><p class="word-diff">${diff}</p><p>${result.pos} ${result.meaning}${result.phonetic ? ` · /${result.phonetic}/` : ''}</p>`;
+    $('#listening-answer').disabled = true;
+    $('#next-listening').hidden = false;
+  });
+  $('#next-listening').addEventListener('click', loadQuestion);
+  loadQuestion().catch(error => toast(error.message));
 }
 
 async function bindWriting() {
