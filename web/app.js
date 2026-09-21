@@ -2,6 +2,7 @@ const state = { route: 'dashboard', settings: null };
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -113,8 +114,8 @@ function renderSettings() {
       <div class="panel-header"><h2>AI Provider</h2><span class="muted">API Key 仅保存在本机</span></div>
       <div class="panel-body form-grid">
         <div class="field"><label for="provider">服务商</label><select id="provider"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="custom">Custom compatible</option></select></div>
-        <div class="field"><label for="model">模型</label><input id="model" value="${ai.model || ''}" placeholder="gpt-4o-mini"></div>
-        <div class="field full"><label for="base-url">Base URL</label><input id="base-url" value="${ai.base_url || ''}" placeholder="https://api.openai.com/v1"></div>
+        <div class="field"><label for="model">模型</label><input id="model" value="${escapeHtml(ai.model || '')}" placeholder="gpt-4o-mini"></div>
+        <div class="field full"><label for="base-url">Base URL</label><input id="base-url" value="${escapeHtml(ai.base_url || '')}" placeholder="https://api.openai.com/v1"></div>
         <div class="field full"><label for="api-key">API Key</label><input id="api-key" type="password" placeholder="${ai.has_api_key ? '已保存，留空则保持不变' : 'sk-...'}" autocomplete="off"></div>
       </div>
       <div class="panel-header"><h2>Daily Goal</h2><span class="muted">达到目标后仍可继续训练</span></div>
@@ -123,7 +124,7 @@ function renderSettings() {
         <div class="field"><label for="reviews">复习词</label><input id="reviews" type="number" min="0" value="${study.daily_reviews ?? 50}"></div>
         <div class="field"><label for="phrases">词组</label><input id="phrases" type="number" min="0" value="${study.daily_phrases ?? 10}"></div>
         <div class="field"><label for="listening-goal">听写</label><input id="listening-goal" type="number" min="0" value="${study.daily_listening ?? 5}"></div>
-        <div class="field"><label for="exam-date">考试日期</label><input id="exam-date" type="date" value="${study.exam_date || ''}"></div>
+        <div class="field"><label for="exam-date">考试日期</label><input id="exam-date" type="date" value="${escapeHtml(study.exam_date || '')}"></div>
         <div class="full"><button class="btn primary" type="submit">保存设置</button></div>
       </div>
     </form>`;
@@ -188,7 +189,7 @@ async function loadDashboard() {
     <section class="dashboard-intro"><div><h2>稳步走向 500</h2><p>完成目标不是终点，今天随时可以继续训练。</p></div>${data.days_to_exam !== null ? `<div class="exam-count"><strong>${data.days_to_exam}</strong><span>days to exam</span></div>` : '<button class="btn" data-route="settings">设置考试日期</button>'}</section>
     <div class="metric-grid">
       <div class="metric"><span>Vocabulary mastery</span><strong>${data.mastered}<small> / ${data.total_words}</small></strong><p>${data.unfamiliar} unfamiliar words</p></div>
-      <div class="metric"><span>Writing score</span><strong>${data.latest_essay ? data.latest_essay.score : '—'}<small> / 100</small></strong><p>${data.latest_essay ? data.latest_essay.title : 'No essay yet'}</p></div>
+      <div class="metric"><span>Writing score</span><strong>${data.latest_essay ? data.latest_essay.score : '—'}<small> / 100</small></strong><p>${data.latest_essay ? escapeHtml(data.latest_essay.title) : 'No essay yet'}</p></div>
       <div class="metric"><span>Listening accuracy</span><strong>${data.listening_accuracy}<small>%</small></strong><p>All dictation attempts</p></div>
       <div class="metric"><span>Study streak</span><strong>${data.streak}<small> days</small></strong><p>Stored on this computer</p></div>
     </div>
@@ -200,8 +201,8 @@ async function loadReview() {
   $('#review-view').innerHTML = `
     <section class="review-head"><div><p>DUE NOW</p><h2>${data.due} items waiting</h2><span>陌生词会混入普通训练，不需要一次清空。</span></div><button class="btn primary" data-route="vocabulary">Start review</button></section>
     <div class="review-grid">
-      <section class="panel"><div class="panel-header"><h2>Unfamiliar words</h2><button id="export-words" class="btn" type="button">Export .txt</button></div><div class="word-table">${data.unfamiliar.length ? data.unfamiliar.map(item => `<div><strong>${item.word}</strong><span>${item.pos}</span><p>${item.meaning}</p><em>${Math.round(item.mastery)}%</em></div>`).join('') : '<p class="empty-copy">还没有陌生词。训练时点击“不认识”后会出现在这里。</p>'}</div></section>
-      <section class="panel"><div class="panel-header"><h2>Writing reminders</h2></div><div class="note-list">${data.writing_notes.length ? data.writing_notes.map(item => `<p>${item}</p>`).join('') : '<p class="empty-copy">完成一篇作文后，这里会积累修改重点。</p>'}</div></section>
+      <section class="panel"><div class="panel-header"><h2>Unfamiliar words</h2><button id="export-words" class="btn" type="button">Export .txt</button></div><div class="word-table">${data.unfamiliar.length ? data.unfamiliar.map(item => `<div><strong>${escapeHtml(item.word)}</strong><span>${escapeHtml(item.pos)}</span><p>${escapeHtml(item.meaning)}</p><em>${Math.round(item.mastery)}%</em></div>`).join('') : '<p class="empty-copy">还没有陌生词。训练时点击“不认识”后会出现在这里。</p>'}</div></section>
+      <section class="panel"><div class="panel-header"><h2>Writing reminders</h2></div><div class="note-list">${data.writing_notes.length ? data.writing_notes.map(item => `<p>${escapeHtml(item)}</p>`).join('') : '<p class="empty-copy">完成一篇作文后，这里会积累修改重点。</p>'}</div></section>
     </div>`;
   const exportButton = $('#export-words');
   if (exportButton) exportButton.addEventListener('click', () => {
@@ -246,10 +247,10 @@ function bindListening() {
   $('#listening-form').addEventListener('submit', async event => {
     event.preventDefault();
     const result = await api('/api/listening/answer', { method: 'POST', body: JSON.stringify({ id: session.question.id, mode: session.question.mode, answer: $('#listening-answer').value }) });
-    const diff = result.diff.map(item => `<span class="${item.correct ? 'heard' : 'missed'}">${item.word}</span>`).join(' ');
+    const diff = result.diff.map(item => `<span class="${item.correct ? 'heard' : 'missed'}">${escapeHtml(item.word)}</span>`).join(' ');
     const feedback = $('#listening-feedback');
     feedback.hidden = false;
-    feedback.innerHTML = `<strong>${result.correct ? 'Perfect transcript.' : 'Compare word by word'}</strong><p class="word-diff">${diff}</p><p>${result.pos} ${result.meaning}${result.phonetic ? ` · /${result.phonetic}/` : ''}</p>`;
+    feedback.innerHTML = `<strong>${result.correct ? 'Perfect transcript.' : 'Compare word by word'}</strong><p class="word-diff">${diff}</p><p>${escapeHtml(result.pos)} ${escapeHtml(result.meaning)}${result.phonetic ? ` · /${escapeHtml(result.phonetic)}/` : ''}</p>`;
     $('#listening-answer').disabled = true;
     $('#next-listening').hidden = false;
   });
@@ -297,11 +298,11 @@ function renderWritingResult(result) {
   const dimensionNames = { content: 'Content', organization: 'Structure', language: 'Language', task_completion: 'Task' };
   $('#writing-result').innerHTML = `
     <div class="score-block"><div class="score-ring"><strong>${result.score}</strong><span>/ 100</span></div><div><span class="source-badge">${result.source === 'ai' ? 'AI REVIEW' : 'LOCAL REVIEW'}</span><p>${result.word_count} words</p></div></div>
-    <div class="result-section"><h3>Overall</h3><p>${result.summary}</p></div>
+    <div class="result-section"><h3>Overall</h3><p>${escapeHtml(result.summary)}</p></div>
     <div class="dimension-list">${Object.entries(dimensions).map(([key, value]) => `<div><span>${dimensionNames[key] || key}</span><meter min="0" max="25" value="${value}"></meter><strong>${value}/25</strong></div>`).join('')}</div>
-    <div class="result-section"><h3>Issues</h3><ul>${(result.issues || []).map(item => `<li>${item}</li>`).join('')}</ul></div>
-    <div class="result-section"><h3>Next revision</h3><ul>${(result.suggestions || []).map(item => `<li>${item}</li>`).join('')}</ul></div>
-    ${result.revised_essay ? `<details class="revision"><summary>Revised version</summary><p>${result.revised_essay.replace(/\n/g, '<br>')}</p></details>` : ''}`;
+    <div class="result-section"><h3>Issues</h3><ul>${(result.issues || []).map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>
+    <div class="result-section"><h3>Next revision</h3><ul>${(result.suggestions || []).map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>
+    ${result.revised_essay ? `<details class="revision"><summary>Revised version</summary><p>${escapeHtml(result.revised_essay).replace(/\n/g, '<br>')}</p></details>` : ''}`;
 }
 
 function bindVocabulary() {
@@ -316,8 +317,8 @@ function bindVocabulary() {
     $('#question-mode').textContent = labels[q.mode].toUpperCase();
     $('#question-area').innerHTML = `
       ${q.unfamiliar ? '<span class="unfamiliar-badge">REVIEW</span>' : ''}
-      <p class="question-prompt">${q.prompt}</p>
-      <p class="question-detail">${q.pos} ${q.mode !== 'en-zh' ? `· ${q.letter_count} letters` : q.phonetic ? `· /${q.phonetic}/` : ''}</p>`;
+      <p class="question-prompt">${escapeHtml(q.prompt)}</p>
+      <p class="question-detail">${escapeHtml(q.pos)} ${q.mode !== 'en-zh' ? `· ${q.letter_count} letters` : q.phonetic ? `· /${escapeHtml(q.phonetic)}/` : ''}</p>`;
     $('#answer-input').value = '';
     $('#answer-input').placeholder = q.mode === 'en-zh' ? '输入一个你知道的中文意思' : 'Type in English';
     $('#answer-input').disabled = false;
@@ -341,7 +342,7 @@ function bindVocabulary() {
     $('#next-word').hidden = false;
     const feedback = $('#answer-feedback');
     feedback.className = `feedback ${gaveUp ? 'warn' : 'success'}`;
-    feedback.innerHTML = `${gaveUp ? '已加入陌生词。' : 'Correct.'} <strong>${result.word}</strong> ${result.pos} ${result.meaning}${result.example ? `<small>${result.example}</small>` : ''}`;
+    feedback.innerHTML = `${gaveUp ? '已加入陌生词。' : 'Correct.'} <strong>${escapeHtml(result.word)}</strong> ${escapeHtml(result.pos)} ${escapeHtml(result.meaning)}${result.example ? `<small>${escapeHtml(result.example)}</small>` : ''}`;
   }
 
   $$('.mode-tabs button').forEach(button => button.addEventListener('click', async () => {
@@ -360,7 +361,7 @@ function bindVocabulary() {
     const feedback = $('#answer-feedback');
     feedback.className = 'feedback error';
     if (session.question.mode === 'en-zh') {
-      feedback.innerHTML = `未匹配。完整释义：<strong>${result.pos} ${result.answer}</strong>。请再输入一次以加强记忆。`;
+      feedback.innerHTML = `未匹配。完整释义：<strong>${escapeHtml(result.pos)} ${escapeHtml(result.answer)}</strong>。请再输入一次以加强记忆。`;
     } else {
       const positions = result.hint.wrong_positions.length ? `错误位置：${result.hint.wrong_positions.join(', ')}` : '长度不匹配';
       const pattern = result.hint.pattern.includes('_') && session.failures >= 3 ? ` · ${result.hint.pattern}` : '';
