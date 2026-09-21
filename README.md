@@ -12,6 +12,16 @@ python3 server.py
 
 然后打开 <http://127.0.0.1:8765>。
 
+如果需要让服务在后台运行，使用项目自带的管理脚本：
+
+```bash
+./scripts/server.sh start
+./scripts/server.sh status
+./scripts/server.sh stop
+```
+
+后台运行时，日志写入 `log/server.log`，进程号写入 `pid/server.pid`。这两个运行时目录均不会提交到 Git。
+
 ## Mac 服务端与 Windows 客户端
 
 Mac 应作为唯一数据源运行服务。首次启动会在 `config.yaml` 的 `server.access_token` 中生成访问令牌；令牌只需要输入一次，浏览器会保存在本机。
@@ -46,3 +56,26 @@ cp config.example.yaml config.yaml
 ```bash
 python3 scripts/download_vocabulary.py
 ```
+
+启动项目
+前台运行：
+cd /Applications/xm/Eng
+python3 server.py
+保持这个终端窗口开启即可。
+后台运行：
+cd /Applications/xm/Eng
+nohup python3 server.py > server.log 2>&1 &
+echo $! > server.pid
+
+关闭项目
+如果前台运行，在 Mac 终端按：
+Ctrl + C
+如果后台运行：
+cd /Applications/xm/Eng
+kill "$(cat server.pid)"
+rm server.pid
+查看后台日志：
+tail -f /Applications/xm/Eng/server.log
+确认服务是否正常：
+curl http://127.0.0.1:8765/api/health
+返回 {"ok": true, ...} 就表示服务正常。
