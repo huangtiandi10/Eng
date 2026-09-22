@@ -104,7 +104,7 @@ function renderListening() {
   return `
     <div class="mode-tabs listening-tabs"><button class="active" data-listening-mode="mixed">Mixed</button><button data-listening-mode="word">Words</button><button data-listening-mode="sentence">Sentences</button></div>
     <section class="listening-stage panel">
-      <div class="listening-top"><span id="listening-type">MIXED DICTATION</span><label>Speed <select id="speech-rate"><option value="0.7">0.7×</option><option value="0.85">0.85×</option><option value="1" selected>1×</option></select></label></div>
+      <div class="listening-top"><span id="listening-type">MIXED DICTATION</span><div class="listening-controls"><label>Voice <select id="speech-voice"><option value="">Loading voices…</option></select></label><button id="refresh-voices" class="icon-btn" type="button" title="刷新可用音色" aria-label="刷新可用音色">↻</button><label>Speed <select id="speech-rate"><option value="0.7">0.7×</option><option value="0.85">0.85×</option><option value="1" selected>1×</option></select></label></div></div>
       <div class="audio-focus">
         <button id="play-audio" class="play-button" type="button" aria-label="播放听力">▶</button>
         <p id="listen-instruction">点击播放，然后写下你听到的内容</p>
@@ -231,6 +231,32 @@ async function loadReview() {
 
 function bindListening() {
   const session = { mode: 'mixed', question: null };
+  const voiceSelect = $('#speech-voice');
+  const voiceStorageKey = 'cet6_listening_voice';
+  let voices = [];
+  function voiceKey(voice) { return `${voice.name}||${voice.lang}`; }
+  function refreshVoices() {
+    if (!('speechSynthesis' in window)) return;
+    const available = speechSynthesis.getVoices();
+    voices = available.filter(voice => /^en(?:-|$)/i.test(voice.lang));
+    voiceSelect.innerHTML = '';
+    if (!voices.length) {
+      voiceSelect.innerHTML = '<option value="">系统未返回英语音色</option>';
+      return;
+    }
+    const saved = localStorage.getItem(voiceStorageKey);
+    voices.forEach(voice => {
+      const option = document.createElement('option');
+      option.value = voiceKey(voice);
+      option.textContent = `${voice.name} (${voice.lang})${voice.default ? ' · default' : ''}`;
+      voiceSelect.append(option);
+    });
+    const preferred = voices.find(voice => voiceKey(voice) === saved) || voices.find(voice => voice.default) || voices[0];
+    voiceSelect.value = voiceKey(preferred);
+  }
+  function selectedVoice() {
+    return voices.find(voice => voiceKey(voice) === voiceSelect.value) || null;
+  }
   async function loadQuestion() {
     speechSynthesis.cancel();
     session.question = await api(`/api/listening/next?mode=${session.mode}`);
@@ -245,7 +271,13 @@ function bindListening() {
     if (!session.question || !('speechSynthesis' in window)) return toast('当前浏览器不支持语音播放');
     speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(session.question.speech);
-    utterance.lang = 'en-US';
+    const voice = selectedVoice();
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang;
+    } else {
+      utterance.lang = 'en-US';
+    }
     utterance.rate = +$('#speech-rate').value;
     speechSynthesis.speak(utterance);
     $('#play-audio').classList.add('playing');
@@ -258,6 +290,11 @@ function bindListening() {
   }));
   $('#play-audio').addEventListener('click', speak);
   $('#replay-audio').addEventListener('click', speak);
+  voiceSelect.addEventListener('change', () => {
+    localStorage.setItem(voiceStorageKey, voiceSelect.value);
+    speak();
+  });
+  $('#refresh-voices').addEventListener('click', refreshVoices);
   $('#listening-form').addEventListener('submit', async event => {
     event.preventDefault();
     const result = await api('/api/listening/answer', { method: 'POST', body: JSON.stringify({ id: session.question.id, mode: session.question.mode, answer: $('#listening-answer').value }) });
@@ -270,6 +307,8 @@ function bindListening() {
     $('#next-listening').focus();
   });
   $('#next-listening').addEventListener('click', loadQuestion);
+  refreshVoices();
+  if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = refreshVoices;
   loadQuestion().catch(error => toast(error.message));
 }
 
