@@ -210,10 +210,44 @@ def choose_mode(requested: str, phrases: list[str]) -> str:
     return random.choice(choices)
 
 
-def next_vocabulary_question(requested_mode: str) -> dict:
+VOCABULARY_SOURCES = {
+    "new": "总词库",
+    "mistakes": "错题集",
+    "mastered": "已完成",
+}
+
+
+def vocabulary_sources() -> list[dict]:
+    with connect() as db:
+        counts = {
+            "new": db.execute(
+                "SELECT COUNT(*) FROM words w LEFT JOIN word_progress p ON p.word_id = w.id WHERE p.word_id IS NULL"
+            ).fetchone()[0],
+            "mistakes": db.execute(
+                "SELECT COUNT(*) FROM word_progress WHERE unfamiliar = 1"
+            ).fetchone()[0],
+            "mastered": db.execute(
+                "SELECT COUNT(*) FROM word_progress WHERE unfamiliar = 0"
+            ).fetchone()[0],
+        }
+    return [{"id": key, "label": label, "count": counts[key]} for key, label in VOCABULARY_SOURCES.items()]
+
+
+def next_vocabulary_question(requested_mode: str, source: str = "new") -> dict:
+    if source not in VOCABULARY_SOURCES:
+        raise ApiError(400, "未知词汇来源")
     now = utc_now()
     with connect() as db:
-        phrase_filter = "WHERE w.phrases_json != '[]'" if requested_mode == "phrase" else ""
+        filters = []
+        if requested_mode == "phrase":
+            filters.append("w.phrases_json != '[]'")
+        if source == "new":
+            filters.append("p.word_id IS NULL")
+        elif source == "mistakes":
+            filters.append("p.unfamiliar = 1")
+        else:
+            filters.append("p.word_id IS NOT NULL AND p.unfamiliar = 0")
+        phrase_filter = "WHERE " + " AND ".join(filters)
         rows = db.execute(
             f"""
             SELECT w.*, COALESCE(p.unfamiliar, 0) AS unfamiliar,
@@ -223,7 +257,7 @@ def next_vocabulary_question(requested_mode: str) -> dict:
             {phrase_filter}
             ORDER BY
               CASE WHEN p.next_review_at IS NOT NULL AND p.next_review_at <= ? THEN 0 ELSE 1 END,
-              CASE WHEN COALESCE(p.unfamiliar, 0) = 1 THEN RANDOM() % 3 ELSE 3 END,
+              CASE WHEN COALESCE(p.unfamiliar, 0) = 1 THEN 0 ELSE 1 END,
               COALESCE(p.mastery, 0), RANDOM()
             LIMIT 12
             """,
@@ -302,6 +336,8 @@ def check_vocabulary_answer(payload: dict) -> dict:
         unfamiliar = progress["unfamiliar"] if progress else 0
         mastery = progress["mastery"] if progress else 0
         mastery = min(100, mastery + (12 if failures == 1 else 6)) if is_correct else max(0, mastery - 3)
+        if not is_correct:
+            unfamiliar = 1
         if is_correct and streak >= 3:
             unfamiliar = 0
         interval_days = min(30, max(1, 2 ** min(streak, 5))) if is_correct else 0
@@ -715,7 +751,11 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/vocabulary/next":
             mode = query.get("mode", ["mixed"])[0]
-            self.send_json(next_vocabulary_question(mode))
+            source = query.get("source", ["new"])[0]
+            self.send_json(next_vocabulary_question(mode, source))
+            return
+        if path == "/api/vocabulary/sources":
+            self.send_json({"sources": vocabulary_sources()})
             return
         if path == "/api/vocabulary/unfamiliar":
             self.send_json({"words": list_unfamiliar_words()})

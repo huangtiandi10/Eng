@@ -55,6 +55,15 @@ function renderReview() {
 
 function renderVocabulary() {
   return `
+    <div class="vocabulary-source-row">
+      <label for="vocabulary-source">词汇来源</label>
+      <select id="vocabulary-source" aria-label="选择词汇来源">
+        <option value="new">新词（未练习）</option>
+        <option value="mistakes">错题集</option>
+        <option value="mastered">已完成</option>
+      </select>
+      <span id="vocabulary-source-count" class="muted"></span>
+    </div>
     <div class="mode-tabs" role="tablist" aria-label="训练模式">
       <button class="active" data-mode="mixed">Mixed</button>
       <button data-mode="zh-en">中 → EN</button>
@@ -360,11 +369,21 @@ function renderWritingResult(result) {
 }
 
 function bindVocabulary() {
-  const session = { mode: 'mixed', question: null, failures: 0, completed: 0, correct: 0, unfamiliar: 0, resolved: false };
+  const session = { source: 'new', mode: 'mixed', question: null, failures: 0, completed: 0, correct: 0, unfamiliar: 0, resolved: false };
   const labels = { 'zh-en': '中译英', 'en-zh': '英译中', phrase: '词组', mixed: '混合' };
+  const sourceSelect = $('#vocabulary-source');
+  const sourceCount = $('#vocabulary-source-count');
+
+  async function loadSources() {
+    const data = await api('/api/vocabulary/sources');
+    sourceSelect.innerHTML = data.sources.map(item => `<option value="${item.id}">${escapeHtml(item.label)}（${item.count}）</option>`).join('');
+    sourceSelect.value = session.source;
+    const selected = data.sources.find(item => item.id === session.source);
+    sourceCount.textContent = selected ? `${selected.count} 个词` : '';
+  }
 
   async function loadQuestion() {
-    session.question = await api(`/api/vocabulary/next?mode=${session.mode}`);
+    session.question = await api(`/api/vocabulary/next?mode=${session.mode}&source=${session.source}`);
     session.failures = 0;
     session.resolved = false;
     const q = session.question;
@@ -405,6 +424,18 @@ function bindVocabulary() {
     $$('.mode-tabs button').forEach(item => item.classList.toggle('active', item === button));
     await loadQuestion();
   }));
+  sourceSelect.addEventListener('change', async () => {
+    session.source = sourceSelect.value;
+    session.completed = 0;
+    session.correct = 0;
+    session.unfamiliar = 0;
+    $('#question-count').textContent = '0 completed';
+    $('#session-correct').textContent = '0';
+    $('#session-unfamiliar').textContent = '0';
+    const selected = [...sourceSelect.options].find(option => option.value === session.source);
+    sourceCount.textContent = selected ? selected.textContent.match(/（(\d+)）/)?.[1] + ' 个词' : '';
+    await loadQuestion();
+  });
   $('#answer-form').addEventListener('submit', async event => {
     event.preventDefault();
     if (session.resolved) return loadQuestion();
@@ -429,7 +460,7 @@ function bindVocabulary() {
     resolveQuestion(result, true);
   });
   $('#next-word').addEventListener('click', loadQuestion);
-  loadQuestion().catch(error => toast(error.message));
+  loadSources().then(loadQuestion).catch(error => toast(error.message));
 }
 
 document.addEventListener('click', event => {
