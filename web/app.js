@@ -267,6 +267,7 @@ function bindListening() {
     feedback.innerHTML = `<strong>${result.correct ? 'Perfect transcript.' : 'Compare word by word'}</strong><p class="word-diff">${diff}</p><p>${escapeHtml(result.pos)} ${escapeHtml(result.meaning)}${result.phonetic ? ` · /${escapeHtml(result.phonetic)}/` : ''}</p>`;
     $('#listening-answer').disabled = true;
     $('#next-listening').hidden = false;
+    $('#next-listening').focus();
   });
   $('#next-listening').addEventListener('click', loadQuestion);
   loadQuestion().catch(error => toast(error.message));
@@ -354,6 +355,7 @@ function bindVocabulary() {
     $('#answer-input').disabled = true;
     $('#give-up').hidden = true;
     $('#next-word').hidden = false;
+    $('#next-word').focus();
     const feedback = $('#answer-feedback');
     feedback.className = `feedback ${gaveUp ? 'warn' : 'success'}`;
     feedback.innerHTML = `${gaveUp ? '已加入陌生词。' : 'Correct.'} <strong>${escapeHtml(result.word)}</strong> ${escapeHtml(result.pos)} ${escapeHtml(result.meaning)}${result.example ? `<small>${escapeHtml(result.example)}</small>` : ''}`;
@@ -394,6 +396,19 @@ function bindVocabulary() {
 document.addEventListener('click', event => {
   const target = event.target.closest('[data-route]');
   if (target) navigate(target.dataset.route).catch(error => toast(error.message));
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.isComposing) return;
+  const active = document.activeElement;
+  const nextListening = $('#next-listening');
+  const nextWord = $('#next-word');
+  if (state.route === 'listening' && nextListening && !nextListening.hidden && active !== nextListening) {
+    event.preventDefault();
+    nextListening.click();
+  } else if (state.route === 'vocabulary' && nextWord && !nextWord.hidden && active !== nextWord) {
+    event.preventDefault();
+    nextWord.click();
+  }
 });
 $('#menu-button').addEventListener('click', () => $('.sidebar').classList.toggle('open'));
 $('#today-label').textContent = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date());
