@@ -419,7 +419,7 @@ function bindVocabulary() {
       feedback.innerHTML = `未匹配。完整释义：<strong>${escapeHtml(result.pos)} ${escapeHtml(result.answer)}</strong>。请再输入一次以加强记忆。`;
     } else {
       const positions = result.hint.wrong_positions.length ? `错误位置：${result.hint.wrong_positions.join(', ')}` : '长度不匹配';
-      const pattern = result.hint.pattern.includes('_') && session.failures >= 3 ? ` · ${result.hint.pattern}` : '';
+      const pattern = session.failures >= 3 ? ` · ${result.hint.pattern}` : '';
       feedback.textContent = `${positions} · ${result.hint.letter_count} letters${pattern}`;
     }
     $('#answer-input').select();

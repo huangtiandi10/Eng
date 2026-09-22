@@ -17,6 +17,10 @@ class CoreLogicTests(unittest.TestCase):
         self.assertTrue(later["pattern"].startswith("ab"))
         self.assertIn(3, early["wrong_positions"])
 
+    def test_hint_keeps_fully_revealed_last_letter(self):
+        result = server.make_hint("abandon", "abonden", 9)
+        self.assertEqual(result["pattern"], "abandon")
+
     def test_local_writing_score_is_percentage(self):
         essay = " ".join(["Learning changes our future."] * 45)
         result = server.local_writing_evaluation(essay)
